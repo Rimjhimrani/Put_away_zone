@@ -385,23 +385,15 @@ def main():
         st.header("📐 Layout Configuration")
         
         # Date width configuration
-        st.subheader("Date Width")
-        date_width_percent = st.slider("Date Width (% of total)", 20, 80, 50, 5)
+        date_width_percent = 65
         date_width_ratio = date_width_percent / 100.0
         
         # Date height configuration
-        st.subheader("Date Height")
-        date_height = st.slider("Date Height (cm)", 1.0, 3.0, 1.5, 0.1)
+        date_height = 1.2
         
         # QR height configuration
-        st.subheader("QR Code Height")
-        qr_height = st.slider("QR Height (cm)", 1.5, 4.0, 2.7, 0.1)
+        qr_height = 2.3
         
-        st.markdown("---")
-        st.markdown("**Preview Settings:**")
-        st.text(f"Date Width: {date_width_percent}%")
-        st.text(f"Date Height: {date_height} cm")
-        st.text(f"QR Height: {qr_height} cm")
     
     # Main content area
     col1, col2 = st.columns([2, 1])
