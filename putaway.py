@@ -372,14 +372,20 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
 
 def main():
     st.set_page_config(
-        page_title="Sticker Label Generator",
+        page_title="Put Away Zone Label Generator",
         page_icon="🏷️",
         layout="wide"
     )
     
-    st.title("🏷️ Sticker Label Generator")
-    st.markdown("Generate professional sticker labels with QR codes from your Excel/CSV data")
-    
+    st.title("🏷️ Put Away Zone Label Generator")
+     st.markdown(
+        "<p style='font-size:18px; font-style:italic; margin-top:-10px; text-align:left;'>"
+        "Designed and Developed by Agilomatrix</p>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown("---")
+
     # Sidebar for configuration
     with st.sidebar:
         st.header("📐 Layout Configuration")
@@ -403,7 +409,7 @@ def main():
         uploaded_file = st.file_uploader(
             "Choose your Excel or CSV file",
             type=['xlsx', 'xls', 'csv'],
-            help="Upload an Excel (.xlsx, .xls) or CSV file containing your sticker data"
+            help="Upload an Excel (.xlsx, .xls) or CSV file containing your put away zone data"
         )
         
         if uploaded_file is not None:
@@ -444,8 +450,8 @@ def main():
             st.metric("Total Columns", len(df.columns))
             
             # Generate button
-            if st.button("🚀 Generate Sticker Labels", type="primary", use_container_width=True):
-                with st.spinner("Generating sticker labels..."):
+            if st.button("🚀 Generate Put Away Zone Labels", type="primary", use_container_width=True):
+                with st.spinner("Generating put away zone labels..."):
                     pdf_path = generate_sticker_labels(
                         df, 
                         date_width_ratio=date_width_ratio,
@@ -462,7 +468,7 @@ def main():
                         os.unlink(pdf_path)
                         
                         # Provide download button
-                        st.success("✅ Sticker labels generated successfully!")
+                        st.success("✅ Put away zone labels generated successfully!")
                         
                         filename = f"sticker_labels_{uploaded_file.name.split('.')[0]}.pdf"
                         st.download_button(
@@ -475,7 +481,7 @@ def main():
                         
                         st.balloons()
                     else:
-                        st.error("❌ Failed to generate sticker labels. Please check your data and try again.")
+                        st.error("❌ Failed to generate put away zone labels. Please check your data and try again.")
         else:
             st.info("👆 Please upload a file to begin")
     
@@ -483,7 +489,7 @@ def main():
     with st.expander("📖 Instructions & Requirements"):
         st.markdown("""
         ### How to use this tool:
-        1. **Upload your file**: Choose an Excel (.xlsx, .xls) or CSV file containing your sticker data
+        1. **Upload your file**: Choose an Excel (.xlsx, .xls) or CSV file containing your put away zone data
         2. **Configure layout**: Use the sidebar to adjust dimensions and layout
         3. **Generate labels**: Click the generate button to create your PDF
         4. **Download**: Download the generated PDF file
