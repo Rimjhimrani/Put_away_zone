@@ -11,30 +11,20 @@ from reportlab.lib.utils import ImageReader
 from io import BytesIO
 import re
 import tempfile
-import subprocess
-import sys
+import base64
 
-# Check for PIL and install if needed
+# Auto-install required packages
 try:
     from PIL import Image as PILImage
-    PIL_AVAILABLE = True
 except ImportError:
-    PIL_AVAILABLE = False
-    st.warning("Installing PIL...")
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pillow'])
-    from PIL import Image as PILImage
-    PIL_AVAILABLE = True
+    st.error("PIL not available. Please install: pip install pillow")
+    st.stop()
 
-# Check for QR code library and install if needed
 try:
     import qrcode
-    QR_AVAILABLE = True
 except ImportError:
-    QR_AVAILABLE = False
-    st.warning("Installing QR code library...")
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'qrcode'])
-    import qrcode
-    QR_AVAILABLE = True
+    st.error("qrcode not available. Please install: pip install qrcode")
+    st.stop()
 
 # Define sticker dimensions
 STICKER_WIDTH = 10 * cm
@@ -42,8 +32,8 @@ STICKER_HEIGHT = 15 * cm
 STICKER_PAGESIZE = (STICKER_WIDTH, STICKER_HEIGHT)
 
 # Define content box dimensions
-CONTENT_BOX_WIDTH = 10 * cm  # Same width as page
-CONTENT_BOX_HEIGHT = 7.2 * cm  # Half the page height
+CONTENT_BOX_WIDTH = 10 * cm
+CONTENT_BOX_HEIGHT = 7.2 * cm
 
 # Define paragraph styles
 bold_style = ParagraphStyle(name='Bold', fontName='Helvetica-Bold', fontSize=16, alignment=TA_CENTER, leading=14)
@@ -53,7 +43,6 @@ qty_style = ParagraphStyle(name='Quantity', fontName='Helvetica', fontSize=11, a
 def generate_qr_code(data_string):
     """Generate a QR code from the given data string"""
     try:
-        # Create QR code instance
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -61,41 +50,31 @@ def generate_qr_code(data_string):
             border=4,
         )
         
-        # Add data
         qr.add_data(data_string)
         qr.make(fit=True)
         
-        # Create QR code image
         qr_img = qr.make_image(fill_color="black", back_color="white")
         
-        # Convert PIL image to bytes that reportlab can use
         img_buffer = BytesIO()
         qr_img.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Create a QR code image with specified size
         return Image(img_buffer, width=2.5*cm, height=2.5*cm)
     except Exception as e:
         st.error(f"Error generating QR code: {e}")
         return None
 
 def parse_location_string(location_str):
-    """Parse a location string into components for table display"""
-    # Initialize with empty values
-    location_parts = [''] * 7
-
+    """Parse a location string into components for table display - only 4 boxes"""
+    location_parts = [''] * 4
     if not location_str or not isinstance(location_str, str):
         return location_parts
 
-    # Remove any extra spaces
     location_str = location_str.strip()
-
-    # Try to parse location components
     pattern = r'([^_\s]+)'
     matches = re.findall(pattern, location_str)
 
-    # Fill the available parts
-    for i, match in enumerate(matches[:7]):
+    for i, match in enumerate(matches[:4]):
         location_parts[i] = match
 
     return location_parts
@@ -103,26 +82,25 @@ def parse_location_string(location_str):
 def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height=2.7):
     """Generate sticker labels with QR code from DataFrame"""
     
-    # Create a function to draw the border box around content
     def draw_border(canvas, doc):
         canvas.saveState()
-        # Draw border box around the content area (10cm x 7.5cm)
-        # Position it at the top of the page with minimal margin
         x_offset = (STICKER_WIDTH - CONTENT_BOX_WIDTH) / 2
-        y_offset = STICKER_HEIGHT - CONTENT_BOX_HEIGHT - 0.2*cm  # Position at top with minimal margin
-        canvas.setStrokeColor(colors.Color(0, 0, 0, alpha=0.95))  # Slightly darker black (95% opacity)
-        canvas.setLineWidth(1.8)  # Slightly thicker border
+        y_offset = STICKER_HEIGHT - CONTENT_BOX_HEIGHT - 0.2*cm
+        canvas.setStrokeColor(colors.Color(0, 0, 0, alpha=0.95))
+        canvas.setLineWidth(1.8)
         canvas.rect(
             x_offset + doc.leftMargin,
             y_offset,
-            CONTENT_BOX_WIDTH - 0.2*cm,  # Account for margins
+            CONTENT_BOX_WIDTH - 0.2*cm,
             CONTENT_BOX_HEIGHT
         )
         canvas.restoreState()
 
     # Identify columns (case-insensitive)
-    df.columns = [col.upper() if isinstance(col, str) else col for col in df.columns]
-    cols = df.columns.tolist()
+    original_columns = df.columns.tolist()
+    df_copy = df.copy()
+    df_copy.columns = [col.upper() if isinstance(col, str) else col for col in df_copy.columns]
+    cols = df_copy.columns.tolist()
 
     # Find GRN No. column
     grn_col = next((col for col in cols if 'GRN' in col and ('NO' in col or 'NUM' in col or '#' in col)),
@@ -136,35 +114,26 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
     desc_col = next((col for col in cols if 'DESC' in col),
                    next((col for col in cols if 'NAME' in col), cols[1] if len(cols) > 1 else part_no_col))
 
-    # Look for put away zone/location column
-    put_away_col = next((col for col in cols if 'PUT' in col and 'AWAY' in col),
-                       next((col for col in cols if 'PUTAWAY' in col),
-                            next((col for col in cols if 'LOC' in col or 'POS' in col or 'LOCATION' in col),
-                                 cols[2] if len(cols) > 2 else desc_col)))
+    # Look for store location column
+    store_location_col = next((col for col in cols if 'STORE' in col and 'LOC' in col),
+                             next((col for col in cols if 'STORELOCATION' in col or 'STORE_LOCATION' in col),
+                                  next((col for col in cols if 'LOC' in col or 'POS' in col or 'LOCATION' in col),
+                                       cols[2] if len(cols) > 2 else desc_col)))
 
     # Look for receipt date column
     receipt_date_col = next((col for col in cols if 'RECEIPT' in col and 'DATE' in col),
                            next((col for col in cols if 'RECEIPTDATE' in col or 'RECEIPT_DATE' in col),
                                 next((col for col in cols if 'DATE' in col), None)))
 
-    # Display column mapping info
-    st.info(f"""
-    **Column Mapping:**
-    - GRN No: {grn_col if grn_col else 'Not found'}
-    - Part No: {part_no_col}
-    - Description: {desc_col}
-    - Put Away Zone/Location: {put_away_col}
-    - Receipt Date: {receipt_date_col if receipt_date_col else 'Not found'}
-    """)
-
-    # Create temporary file for PDF
+    # Create temporary PDF file
     temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    temp_pdf_path = temp_pdf.name
     temp_pdf.close()
 
     # Create document with minimal margins
-    doc = SimpleDocTemplate(temp_pdf.name, pagesize=STICKER_PAGESIZE,
-                          topMargin=0.2*cm,  # Minimal top margin
-                          bottomMargin=(STICKER_HEIGHT - CONTENT_BOX_HEIGHT - 0.2*cm),  # Adjust bottom margin accordingly
+    doc = SimpleDocTemplate(temp_pdf_path, pagesize=STICKER_PAGESIZE,
+                          topMargin=0.2*cm,
+                          bottomMargin=(STICKER_HEIGHT - CONTENT_BOX_HEIGHT - 0.2*cm),
                           leftMargin=0.1*cm, rightMargin=0.1*cm)
 
     content_width = CONTENT_BOX_WIDTH - 0.2*cm
@@ -172,15 +141,15 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
 
     # Progress bar
     progress_bar = st.progress(0)
-    status_text = st.empty()
-
+    status_placeholder = st.empty()
+    
     # Process each row as a single sticker
-    total_rows = len(df)
-    for index, row in df.iterrows():
+    total_rows = len(df_copy)
+    for index, row in df_copy.iterrows():
         # Update progress
         progress = (index + 1) / total_rows
         progress_bar.progress(progress)
-        status_text.text(f"Creating sticker {index+1} of {total_rows} ({int(progress*100)}%)")
+        status_placeholder.text(f"Creating sticker {index+1} of {total_rows} ({int(progress*100)}%)")
         
         elements = []
 
@@ -188,21 +157,20 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
         grn_no = str(row[grn_col]) if grn_col and grn_col in row and pd.notna(row[grn_col]) else ""
         part_no = str(row[part_no_col])
         desc = str(row[desc_col])
-        put_away_zone = str(row[put_away_col]) if put_away_col and put_away_col in row else ""
+        store_location = str(row[store_location_col]) if store_location_col and store_location_col in row else ""
         receipt_date = str(row[receipt_date_col]) if receipt_date_col and receipt_date_col in row and pd.notna(row[receipt_date_col]) else ""
         
-        location_parts = parse_location_string(put_away_zone)
+        location_parts = parse_location_string(store_location)
 
-        # Define row heights (increased slightly)
-        grn_row_height = 0.9*cm      # New row for GRN No.
+        # Define row heights
+        grn_row_height = 0.9*cm
         header_row_height = 0.9*cm
-        desc_row_height = 1.2*cm
-        location_row_height = 1.0*cm
+        desc_row_height = 1.4*cm
+        location_row_height = 0.8*cm
 
-        # Clean receipt date - remove time if present
+        # Clean receipt date
         clean_receipt_date = ""
         if receipt_date and receipt_date != "nan":
-            # Try to extract just the date part
             try:
                 if " " in receipt_date:
                     clean_receipt_date = receipt_date.split(" ")[0]
@@ -211,12 +179,11 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
             except:
                 clean_receipt_date = receipt_date
 
-        # Generate QR code with part information including GRN
-        qr_data = f"GRN No: {grn_no}\nPart No: {part_no}\nDescription: {desc}\nPut Away Zone/Location: {put_away_zone}\nReceipt Date: {clean_receipt_date}"
-        
+        # Generate QR code
+        qr_data = f"GRN No: {grn_no}\nPart No: {part_no}\nDescription: {desc}\nStore Location: {store_location}\nReceipt Date: {clean_receipt_date}"
         qr_image = generate_qr_code(qr_data)
 
-        # Main table data (3 boxes: GRN No, Part No, Description)
+        # Main table data
         main_table_data = [
             ["GRN No", Paragraph(f"{grn_no}", bold_style)],
             ["Part No", Paragraph(f"{part_no}", bold_style)],
@@ -229,7 +196,7 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
                          rowHeights=[grn_row_height, header_row_height, desc_row_height])
 
         main_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),  # Darker grid lines
+            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -238,78 +205,66 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
 
         elements.append(main_table)
 
-        # Put Away Zone/Location detail section
-        put_away_label = Paragraph("Put Away Zone/Loc", ParagraphStyle(
-            name='PutAwayLoc', fontName='Helvetica-Bold', fontSize=11, alignment=TA_CENTER
+        # Store Location section
+        store_location_label = Paragraph("Store Location", ParagraphStyle(
+            name='StoreLocation', fontName='Helvetica-Bold', fontSize=11, alignment=TA_CENTER
         ))
 
-        # Total width for the 7 inner columns (2/3 of full content width)
         inner_table_width = content_width * 2 / 3
-        
-        # Define proportional widths - same as original 7 boxes
-        col_proportions = [1.25, 1.25, 1.25, 1.25, 1, 1, 0.9]
-        total_proportion = sum(col_proportions)
-        
-        # Calculate column widths based on proportions 
-        inner_col_widths = [w * inner_table_width / total_proportion for w in col_proportions]
+        inner_col_widths = [inner_table_width / 4] * 4
 
-        put_away_inner_table = Table(
+        store_location_inner_table = Table(
             [location_parts],
             colWidths=inner_col_widths,
             rowHeights=[location_row_height]
         )
 
-        put_away_inner_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),  # Darker grid lines
+        store_location_inner_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),  # Make location values bold
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
         ]))
 
-        put_away_table = Table(
-            [[put_away_label, put_away_inner_table]],
+        store_location_table = Table(
+            [[store_location_label, store_location_inner_table]],
             colWidths=[content_width/3, inner_table_width],
             rowHeights=[location_row_height]
         )
 
-        put_away_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),  # Darker grid lines
+        store_location_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
 
-        elements.append(put_away_table)
+        elements.append(store_location_table)
 
-        # Bottom section - Receipt Date and QR Code in separate boxes in the same row
-        # Use configurable dimensions from GUI
-        date_row_height = date_height * cm      # Date section height (from GUI)
-        qr_row_height = qr_height * cm          # QR code height (from GUI)
-        
-        # Date box width (left side) - configurable ratio from GUI
-        date_width = content_width * date_width_ratio  # From GUI slider
-        
-        # QR code width (right side) - remaining width
+        # Bottom section
+        date_row_height = date_height * cm
+        qr_row_height = qr_height * cm
+        date_width = content_width * date_width_ratio
         qr_width = content_width - date_width
 
-        # Create Receipt Date box with label and date in horizontal layout
+        # Create Receipt Date box
         date_table = Table(
             [["Receipt Date:", Paragraph(str(clean_receipt_date), qty_style)]],
-            colWidths=[date_width*0.4, date_width*0.6],  # Split date box horizontally
+            colWidths=[date_width*0.4, date_width*0.6],
             rowHeights=[date_row_height]
         )
 
         date_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.2, colors.Color(0, 0, 0, alpha=0.95)),
-            ('ALIGN', (0, 0), (0, 0), 'RIGHT'),  # Right align "Receipt Date:" label
-            ('ALIGN', (1, 0), (1, 0), 'LEFT'),   # Left align date value
+            ('ALIGN', (0, 0), (0, 0), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, 0), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),  # Bold for label
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (0, 0), 10),
-            ('FONTSIZE', (1, 0), (1, 0), 10),  # Font size for date value
+            ('FONTSIZE', (1, 0), (1, 0), 10),
         ]))
 
-        # Create QR Code box - INVISIBLE BORDER
+        # Create QR Code box
         if qr_image:
             qr_table = Table(
                 [[qr_image]],
@@ -325,191 +280,188 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
                 rowHeights=[qr_row_height]
             )
 
-        # QR table style with INVISIBLE BORDER (using transparent/white color)
         qr_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0, colors.Color(1, 1, 1, alpha=0)),  # Invisible border (white with 0% opacity)
+            ('GRID', (0, 0), (-1, -1), 0, colors.Color(1, 1, 1, alpha=0)),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
 
-        # Create the combined bottom row table with Date on left and QR on right
-        # Use the taller height (QR height) for the combined table
+        # Combined bottom table
         bottom_table = Table(
             [[date_table, qr_table]],
             colWidths=[date_width, qr_width],
-            rowHeights=[qr_row_height]  # Use QR height as the overall row height
+            rowHeights=[qr_row_height]
         )
 
         bottom_table.setStyle(TableStyle([
-            # No grid for the outer table to avoid double borders
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Align to top since heights are different
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ]))
 
-        # Add spacer before bottom section
         elements.append(Spacer(1, 0.3*cm))
-        
-        # Add the combined bottom table
         elements.append(bottom_table)
 
-        # Add all elements for this sticker to the document
         all_elements.extend(elements)
 
-        # Add page break after each sticker (except the last one)
-        if index < len(df) - 1:
+        # Add page break except for last sticker
+        if index < len(df_copy) - 1:
             all_elements.append(PageBreak())
 
     # Build the document
     try:
-        # Pass the draw_border function to build to add border box
         doc.build(all_elements, onFirstPage=draw_border, onLaterPages=draw_border)
+        status_placeholder.text("PDF generated successfully!")
         progress_bar.progress(1.0)
-        status_text.text("PDF generated successfully!")
-        return temp_pdf.name
+        return temp_pdf_path
     except Exception as e:
         st.error(f"Error building PDF: {e}")
         return None
 
+def get_download_link(file_path, filename):
+    """Generate a download link for the PDF file"""
+    with open(file_path, "rb") as f:
+        bytes_data = f.read()
+    b64 = base64.b64encode(bytes_data).decode()
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download PDF</a>'
+    return href
+
 def main():
     st.set_page_config(
-        page_title="Put Away Zone Label Generator",
+        page_title="Sticker Label Generator",
         page_icon="🏷️",
         layout="wide"
     )
     
-    st.title("🏷️ Put Away Zone Label Generator")
-    st.markdown(
-        "<p style='font-size:18px; font-style:italic; margin-top:-10px; text-align:left;'>"
-        "Designed and Developed by Agilomatrix</p>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown("---")
-
-    # Sidebar for configuration
-    with st.sidebar:
-        st.header("📐 Layout Configuration")
-        
-        # Date width configuration
-        date_width_percent = 65
-        date_width_ratio = date_width_percent / 100.0
-        
-        # Date height configuration
-        date_height = 1.2
-        
-        # QR height configuration
-        qr_height = 2.3
-        
+    st.title("🏷️ Sticker Label Generator")
+    st.markdown("Generate professional sticker labels with QR codes from your Excel/CSV data")
     
-    # Main content area
+    # Sidebar for settings
+    st.sidebar.header("Layout Settings")
+    
+    # Date width control
+    date_width_percent = st.sidebar.slider(
+        "Date Width (%)", 
+        min_value=20, 
+        max_value=80, 
+        value=50, 
+        step=5,
+        help="Percentage of total width for the date section"
+    )
+    date_width_ratio = date_width_percent / 100.0
+    
+    # Date height control
+    date_height = st.sidebar.slider(
+        "Date Height (cm)", 
+        min_value=1.0, 
+        max_value=3.0, 
+        value=1.2, 
+        step=0.1,
+        help="Height of the date section"
+    )
+    
+    # QR height control
+    qr_height = st.sidebar.slider(
+        "QR Height (cm)", 
+        min_value=1.5, 
+        max_value=4.0, 
+        value=2.3, 
+        step=0.1,
+        help="Height of the QR code section"
+    )
+    
+    # Main content
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("📁 File Upload")
+        st.header("Upload File")
         uploaded_file = st.file_uploader(
-            "Choose your Excel or CSV file",
+            "Choose an Excel or CSV file",
             type=['xlsx', 'xls', 'csv'],
-            help="Upload an Excel (.xlsx, .xls) or CSV file containing your put away zone data"
+            help="Upload your data file containing the information for sticker labels"
         )
         
         if uploaded_file is not None:
             try:
                 # Read the file
-                if uploaded_file.name.endswith('.csv'):
+                if uploaded_file.name.lower().endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
                 else:
                     df = pd.read_excel(uploaded_file)
                 
-                st.success(f"File loaded successfully! Found {len(df)} rows and {len(df.columns)} columns.")
-                
-                # Show data preview
-                st.subheader("📊 Data Preview")
-                st.dataframe(df.head(10), use_container_width=True)
+                st.success(f"✅ File loaded successfully! Found {len(df)} rows and {len(df.columns)} columns.")
                 
                 # Show column information
-                st.subheader("📋 Column Information")
-                col_info = pd.DataFrame({
-                    'Column Name': df.columns,
-                    'Data Type': df.dtypes,
-                    'Non-Null Count': df.count(),
-                    'Sample Value': [str(df[col].iloc[0]) if len(df) > 0 else '' for col in df.columns]
-                })
-                st.dataframe(col_info, use_container_width=True)
+                st.subheader("📊 Data Preview")
+                st.write(f"**Columns found:** {', '.join(df.columns.tolist())}")
                 
-            except Exception as e:
-                st.error(f"Error reading file: {str(e)}")
-                df = None
-        else:
-            df = None
-    
-    with col2:
-        st.header("⚙️ Generation")
-        
-        if df is not None:
-            st.metric("Total Records", len(df))
-            st.metric("Total Columns", len(df.columns))
-            
-            # Generate button
-            if st.button("🚀 Generate Put Away Zone Labels", type="primary", use_container_width=True):
-                with st.spinner("Generating put away zone labels..."):
-                    pdf_path = generate_sticker_labels(
-                        df, 
-                        date_width_ratio=date_width_ratio,
-                        date_height=date_height,
-                        qr_height=qr_height
-                    )
-                    
-                    if pdf_path:
-                        # Read the PDF file
-                        with open(pdf_path, 'rb') as pdf_file:
-                            pdf_data = pdf_file.read()
-                        
-                        # Clean up temporary file
-                        os.unlink(pdf_path)
-                        
-                        # Provide download button
-                        st.success("✅ Put away zone labels generated successfully!")
-                        
-                        filename = f"sticker_labels_{uploaded_file.name.split('.')[0]}.pdf"
-                        st.download_button(
-                            label="📥 Download PDF",
-                            data=pdf_data,
-                            file_name=filename,
-                            mime="application/pdf",
-                            use_container_width=True
+                # Show first few rows
+                st.write(df.head())
+                
+                # Generate button
+                st.subheader("🎯 Generate Labels")
+                
+                if st.button("🚀 Generate Sticker Labels", type="primary"):
+                    with st.spinner("Generating sticker labels..."):
+                        pdf_path = generate_sticker_labels(
+                            df, 
+                            date_width_ratio=date_width_ratio,
+                            date_height=date_height,
+                            qr_height=qr_height
                         )
                         
-                        st.balloons()
-                    else:
-                        st.error("❌ Failed to generate put away zone labels. Please check your data and try again.")
-        else:
-            st.info("👆 Please upload a file to begin")
+                        if pdf_path:
+                            st.success("🎉 Sticker labels generated successfully!")
+                            
+                            # Create download link
+                            filename = f"{uploaded_file.name.split('.')[0]}_sticker_labels.pdf"
+                            download_link = get_download_link(pdf_path, filename)
+                            st.markdown(download_link, unsafe_allow_html=True)
+                            
+                            # Clean up temporary file after a delay
+                            import time
+                            time.sleep(1)
+                            try:
+                                os.unlink(pdf_path)
+                            except:
+                                pass
+                        else:
+                            st.error("❌ Failed to generate sticker labels.")
+                            
+            except Exception as e:
+                st.error(f"❌ Error reading file: {str(e)}")
     
-    # Instructions
-    with st.expander("📖 Instructions & Requirements"):
+    with col2:
+        st.header("ℹ️ Instructions")
         st.markdown("""
-        ### How to use this tool:
-        1. **Upload your file**: Choose an Excel (.xlsx, .xls) or CSV file containing your put away zone data
-        2. **Configure layout**: Use the sidebar to adjust dimensions and layout
-        3. **Generate labels**: Click the generate button to create your PDF
-        4. **Download**: Download the generated PDF file
+        **How to use:**
         
-        ### Required/Expected Columns:
-        The tool will automatically detect columns based on these patterns (case-insensitive):
+        1. **Upload your file** (Excel or CSV)
+        2. **Adjust layout settings** in the sidebar
+        3. **Click Generate** to create your sticker labels
+        4. **Download** the generated PDF
         
-        - **GRN No**: Columns containing "GRN" and ("NO" or "NUM" or "#")
-        - **Part No**: Columns containing "PART" and ("NO" or "NUM" or "#")
-        - **Description**: Columns containing "DESC" or "NAME"
-        - **Put Away Zone/Location**: Columns containing "PUT AWAY", "PUTAWAY", "LOC", "POS", or "LOCATION"
-        - **Receipt Date**: Columns containing "RECEIPT" and "DATE", or just "DATE"
+        **Expected columns:**
+        - GRN No./GRN Number
+        - Part No./Part Number  
+        - Description/Name
+        - Store Location
+        - Receipt Date
         
-        ### Features:
+        **Features:**
+        - ✅ QR codes with all item data
+        - ✅ Professional border layout
+        - ✅ Customizable dimensions
         - ✅ Automatic column detection
-        - ✅ QR code generation with all item details
-        - ✅ Customizable layout dimensions
-        - ✅ Professional sticker format (10cm x 15cm)
-        - ✅ Bordered content area for precise printing
-        - ✅ Support for Excel and CSV files
+        - ✅ Ready for printing
+        """)
+        
+        st.header("📋 Layout Preview")
+        st.markdown(f"""
+        **Current Settings:**
+        - Date Width: {date_width_percent}%
+        - Date Height: {date_height} cm
+        - QR Height: {qr_height} cm
+        - Sticker Size: 10×15 cm
         """)
 
 if __name__ == "__main__":
