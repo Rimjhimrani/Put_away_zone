@@ -35,6 +35,11 @@ STICKER_PAGESIZE = (STICKER_WIDTH, STICKER_HEIGHT)
 CONTENT_BOX_WIDTH = 10 * cm
 CONTENT_BOX_HEIGHT = 7.2 * cm
 
+# Fixed layout settings
+DATE_WIDTH_RATIO = 0.65  # 65% for date section
+DATE_HEIGHT = 1.2  # cm
+QR_HEIGHT = 2.3  # cm
+
 # Define paragraph styles
 bold_style = ParagraphStyle(name='Bold', fontName='Helvetica-Bold', fontSize=16, alignment=TA_CENTER, leading=14)
 desc_style = ParagraphStyle(name='Description', fontName='Helvetica', fontSize=11, alignment=TA_CENTER, leading=12)
@@ -79,7 +84,7 @@ def parse_location_string(location_str):
 
     return location_parts
 
-def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height=2.7):
+def generate_sticker_labels(df):
     """Generate sticker labels with QR code from DataFrame"""
     
     def draw_border(canvas, doc):
@@ -242,9 +247,9 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
         elements.append(store_location_table)
 
         # Bottom section
-        date_row_height = date_height * cm
-        qr_row_height = qr_height * cm
-        date_width = content_width * date_width_ratio
+        date_row_height = DATE_HEIGHT * cm
+        qr_row_height = QR_HEIGHT * cm
+        date_width = content_width * DATE_WIDTH_RATIO
         qr_width = content_width - date_width
 
         # Create Receipt Date box
@@ -317,63 +322,27 @@ def generate_sticker_labels(df, date_width_ratio=0.5, date_height=1.5, qr_height
         st.error(f"Error building PDF: {e}")
         return None
 
-def get_download_link(file_path, filename):
-    """Generate a download link for the PDF file"""
-    with open(file_path, "rb") as f:
-        bytes_data = f.read()
-    b64 = base64.b64encode(bytes_data).decode()
-    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download PDF</a>'
-    return href
-
 def main():
     st.set_page_config(
-        page_title="Sticker Label Generator",
+        page_title="Put Away Zone Label Generator",
         page_icon="🏷️",
         layout="wide"
     )
     
-    st.title("🏷️ Sticker Label Generator")
-    st.markdown("Generate professional sticker labels with QR codes from your Excel/CSV data")
-    
-    # Sidebar for settings
-    st.sidebar.header("Layout Settings")
-    
-    # Date width control
-    date_width_percent = st.sidebar.slider(
-        "Date Width (%)", 
-        min_value=20, 
-        max_value=80, 
-        value=50, 
-        step=5,
-        help="Percentage of total width for the date section"
+    st.title("🏷️ Put Away Zone Label Generator")
+    st.markdown(
+        "<p style='font-size:18px; font-style:italic; margin-top:-10px; text-align:left;'>"
+        "Designed and Developed by Agilomatrix</p>",
+        unsafe_allow_html=True
     )
-    date_width_ratio = date_width_percent / 100.0
-    
-    # Date height control
-    date_height = st.sidebar.slider(
-        "Date Height (cm)", 
-        min_value=1.0, 
-        max_value=3.0, 
-        value=1.2, 
-        step=0.1,
-        help="Height of the date section"
-    )
-    
-    # QR height control
-    qr_height = st.sidebar.slider(
-        "QR Height (cm)", 
-        min_value=1.5, 
-        max_value=4.0, 
-        value=2.3, 
-        step=0.1,
-        help="Height of the QR code section"
-    )
+
+    st.markdown("---")
     
     # Main content
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("Upload File")
+        st.header("📁 Upload File")
         uploaded_file = st.file_uploader(
             "Choose an Excel or CSV file",
             type=['xlsx', 'xls', 'csv'],
@@ -400,26 +369,54 @@ def main():
                 # Generate button
                 st.subheader("🎯 Generate Labels")
                 
-                if st.button("🚀 Generate Sticker Labels", type="primary"):
+                if st.button("🚀 Generate Sticker Labels", type="primary", use_container_width=True):
                     with st.spinner("Generating sticker labels..."):
-                        pdf_path = generate_sticker_labels(
-                            df, 
-                            date_width_ratio=date_width_ratio,
-                            date_height=date_height,
-                            qr_height=qr_height
-                        )
+                        pdf_path = generate_sticker_labels(df)
                         
                         if pdf_path:
                             st.success("🎉 Sticker labels generated successfully!")
                             
-                            # Create download link
-                            filename = f"{uploaded_file.name.split('.')[0]}_sticker_labels.pdf"
-                            download_link = get_download_link(pdf_path, filename)
-                            st.markdown(download_link, unsafe_allow_html=True)
+                            # Create download section
+                            st.subheader("📥 Download Your PDF")
                             
-                            # Clean up temporary file after a delay
-                            import time
-                            time.sleep(1)
+                            # Read PDF file
+                            with open(pdf_path, "rb") as pdf_file:
+                                pdf_bytes = pdf_file.read()
+                            
+                            # Create filename
+                            filename = f"{uploaded_file.name.split('.')[0]}_sticker_labels.pdf"
+                            
+                            # Download button in a container with styling
+                            with st.container():
+                                st.markdown("""
+                                <div style="
+                                    border: 2px solid #4CAF50;
+                                    border-radius: 10px;
+                                    padding: 20px;
+                                    text-align: center;
+                                    background-color: #f0f8ff;
+                                    margin: 10px 0;
+                                ">
+                                    <h4 style="color: #4CAF50; margin-bottom: 15px;">📄 Your PDF is Ready!</h4>
+                                    <p style="margin-bottom: 15px;">Click the button below to download your sticker labels</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Download button
+                                st.download_button(
+                                    label="📥 Download PDF File",
+                                    data=pdf_bytes,
+                                    file_name=filename,
+                                    mime="application/pdf",
+                                    type="primary",
+                                    use_container_width=True
+                                )
+                                
+                                # File info
+                                file_size_mb = len(pdf_bytes) / (1024 * 1024)
+                                st.info(f"📊 File size: {file_size_mb:.2f} MB | Labels: {len(df)}")
+                            
+                            # Clean up temporary file
                             try:
                                 os.unlink(pdf_path)
                             except:
@@ -436,9 +433,9 @@ def main():
         **How to use:**
         
         1. **Upload your file** (Excel or CSV)
-        2. **Adjust layout settings** in the sidebar
+        2. **Review your data** in the preview
         3. **Click Generate** to create your sticker labels
-        4. **Download** the generated PDF
+        4. **Download** the generated PDF from the download box
         
         **Expected columns:**
         - GRN No./GRN Number
@@ -450,19 +447,39 @@ def main():
         **Features:**
         - ✅ QR codes with all item data
         - ✅ Professional border layout
-        - ✅ Customizable dimensions
+        - ✅ Optimized dimensions (10×15 cm)
         - ✅ Automatic column detection
         - ✅ Ready for printing
         """)
         
-        st.header("📋 Layout Preview")
+        st.header("⚙️ Layout Settings")
         st.markdown(f"""
-        **Current Settings:**
-        - Date Width: {date_width_percent}%
-        - Date Height: {date_height} cm
-        - QR Height: {qr_height} cm
+        **Fixed Configuration:**
+        - Date Width: 65% of label width
+        - Date Height: 1.2 cm
+        - QR Height: 2.3 cm
         - Sticker Size: 10×15 cm
+        - Professional borders and formatting
+        
+        **Optimized for:**
+        - High-quality printing
+        - Clear QR code scanning
+        - Professional appearance
         """)
+        
+        # Add some styling
+        st.markdown("""
+        <style>
+        .stDownloadButton > button {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
